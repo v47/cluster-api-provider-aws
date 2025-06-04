@@ -22,9 +22,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/sqs"
-	"github.com/aws/aws-sdk-go/service/sqs/sqsiface"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/golang/mock/gomock"
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -45,7 +44,7 @@ func TestAWSInstanceStateController(t *testing.T) {
 	instanceStateReconciler = &AwsInstanceStateReconciler{
 		Client: testEnv.Client,
 		Log:    ctrl.Log.WithName("controllers").WithName("AWSInstanceState"),
-		sqsServiceFactory: func() sqsiface.SQSAPI {
+		sqsServiceFactory: func() instancestate.SQSAPI {
 			return sqsSvs
 		},
 	}
@@ -58,13 +57,13 @@ func TestAWSInstanceStateController(t *testing.T) {
 			Name:      "aws-cluster-1-instance-1",
 			Namespace: "default",
 		}
-		sqsSvs.EXPECT().GetQueueUrl(&sqs.GetQueueUrlInput{QueueName: aws.String("aws-cluster-1-queue")}).AnyTimes().
+		sqsSvs.EXPECT().GetQueueUrl(context.TODO(), &sqs.GetQueueUrlInput{QueueName: aws.String("aws-cluster-1-queue")}).AnyTimes().
 			Return(&sqs.GetQueueUrlOutput{QueueUrl: aws.String("aws-cluster-1-url")}, nil)
-		sqsSvs.EXPECT().GetQueueUrl(&sqs.GetQueueUrlInput{QueueName: aws.String("aws-cluster-2-queue")}).AnyTimes().
+		sqsSvs.EXPECT().GetQueueUrl(context.TODO(), &sqs.GetQueueUrlInput{QueueName: aws.String("aws-cluster-2-queue")}).AnyTimes().
 			Return(&sqs.GetQueueUrlOutput{QueueUrl: aws.String("aws-cluster-2-url")}, nil)
-		sqsSvs.EXPECT().GetQueueUrl(&sqs.GetQueueUrlInput{QueueName: aws.String("aws-cluster-3-queue")}).AnyTimes().
+		sqsSvs.EXPECT().GetQueueUrl(context.TODO(), &sqs.GetQueueUrlInput{QueueName: aws.String("aws-cluster-3-queue")}).AnyTimes().
 			Return(&sqs.GetQueueUrlOutput{QueueUrl: aws.String("aws-cluster-3-url")}, nil)
-		sqsSvs.EXPECT().ReceiveMessage(&sqs.ReceiveMessageInput{QueueUrl: aws.String("aws-cluster-1-url")}).AnyTimes().
+		sqsSvs.EXPECT().ReceiveMessage(context.TODO(), &sqs.ReceiveMessageInput{QueueUrl: aws.String("aws-cluster-1-url")}).AnyTimes().
 			DoAndReturn(func(arg *sqs.ReceiveMessageInput) (*sqs.ReceiveMessageOutput, error) {
 				m := &infrav1.AWSMachine{}
 				lookupKey := types.NamespacedName{
@@ -85,11 +84,11 @@ func TestAWSInstanceStateController(t *testing.T) {
 				return &sqs.ReceiveMessageOutput{Messages: []*sqs.Message{}}, nil
 			})
 
-		sqsSvs.EXPECT().ReceiveMessage(&sqs.ReceiveMessageInput{QueueUrl: aws.String("aws-cluster-2-url")}).AnyTimes().
+		sqsSvs.EXPECT().ReceiveMessage(context.TODO(), &sqs.ReceiveMessageInput{QueueUrl: aws.String("aws-cluster-2-url")}).AnyTimes().
 			Return(&sqs.ReceiveMessageOutput{Messages: []*sqs.Message{}}, nil)
-		sqsSvs.EXPECT().ReceiveMessage(&sqs.ReceiveMessageInput{QueueUrl: aws.String("aws-cluster-3-url")}).AnyTimes().
+		sqsSvs.EXPECT().ReceiveMessage(context.TODO(), &sqs.ReceiveMessageInput{QueueUrl: aws.String("aws-cluster-3-url")}).AnyTimes().
 			Return(&sqs.ReceiveMessageOutput{Messages: []*sqs.Message{}}, nil)
-		sqsSvs.EXPECT().DeleteMessage(&sqs.DeleteMessageInput{QueueUrl: aws.String("aws-cluster-1-url"), ReceiptHandle: aws.String("message-receipt-handle")}).AnyTimes().
+		sqsSvs.EXPECT().DeleteMessage(context.TODO(), &sqs.DeleteMessageInput{QueueUrl: aws.String("aws-cluster-1-url"), ReceiptHandle: aws.String("message-receipt-handle")}).AnyTimes().
 			Return(nil, nil)
 
 		g.Expect(testEnv.Manager.GetFieldIndexer().IndexField(context.Background(), &infrav1.AWSMachine{},

@@ -17,16 +17,17 @@ limitations under the License.
 package instancestate
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/awserr"
-	"github.com/aws/aws-sdk-go/service/eventbridge"
-	"github.com/aws/aws-sdk-go/service/sqs"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/eventbridge"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/pkg/errors"
 
 	infrav1 "sigs.k8s.io/cluster-api-provider-aws/v2/api/v1beta2"
+	awserrors "sigs.k8s.io/cluster-api-provider-aws/v2/pkg/cloud/awserrors"
 )
 
 // Ec2StateChangeNotification defines the EC2 instance's state change notification.
@@ -35,7 +36,7 @@ const Ec2StateChangeNotification = "EC2 Instance State-change Notification"
 // reconcileRules creates rules and attaches the queue as a target.
 func (s Service) reconcileRules() error {
 	var ruleNotFound bool
-	ruleResp, err := s.EventBridgeClient.DescribeRule(&eventbridge.DescribeRuleInput{
+	ruleResp, err := s.EventBridgeClient.DescribeRule(context.TODO(), &eventbridge.DescribeRuleInput{
 		Name: aws.String(s.getEC2RuleName()),
 	})
 	if err != nil {
@@ -52,7 +53,7 @@ func (s Service) reconcileRules() error {
 			return errors.Wrap(err, "unable to create rule")
 		}
 		// fetch newly created rule
-		ruleResp, err = s.EventBridgeClient.DescribeRule(&eventbridge.DescribeRuleInput{
+		ruleResp, err = s.EventBridgeClient.DescribeRule(context.TODO(), &eventbridge.DescribeRuleInput{
 			Name: aws.String(s.getEC2RuleName()),
 		})
 
@@ -61,14 +62,14 @@ func (s Service) reconcileRules() error {
 		}
 	}
 
-	queueURLResp, err := s.SQSClient.GetQueueUrl(&sqs.GetQueueUrlInput{
+	queueURLResp, err := s.SQSClient.GetQueueUrl(context.TODO(), &sqs.GetQueueUrlInput{
 		QueueName: aws.String(GenerateQueueName(s.scope.Name())),
 	})
 
 	if err != nil {
 		return errors.Wrap(err, "unable to get queue URL")
 	}
-	queueAttrs, err := s.SQSClient.GetQueueAttributes(&sqs.GetQueueAttributesInput{
+	queueAttrs, err := s.SQSClient.GetQueueAttributes(context.TODO(), &sqs.GetQueueAttributesInput{
 		AttributeNames: aws.StringSlice([]string{sqs.QueueAttributeNameQueueArn, sqs.QueueAttributeNamePolicy}),
 		QueueUrl:       queueURLResp.QueueUrl,
 	})
@@ -93,7 +94,7 @@ func (s Service) reconcileRules() error {
 	}
 
 	if !targetFound {
-		_, err = s.EventBridgeClient.PutTargets(&eventbridge.PutTargetsInput{
+		_, err = s.EventBridgeClient.PutTargets(context.TODO(), &eventbridge.PutTargetsInput{
 			Rule: ruleResp.Name,
 			Targets: []*eventbridge.Target{{
 				Arn: queueAttrs.Attributes[sqs.QueueAttributeNameQueueArn],
@@ -135,7 +136,7 @@ func (s Service) createRule() error {
 	}
 	// create in disabled state so the rule doesn't pick up all EC2 instances. As machines get created,
 	// the rule will get updated to track those machines
-	_, err = s.EventBridgeClient.PutRule(&eventbridge.PutRuleInput{
+	_, err = s.EventBridgeClient.PutRule(context.TODO(), &eventbridge.PutRuleInput{
 		Name:         aws.String(s.getEC2RuleName()),
 		EventPattern: aws.String(string(data)),
 		State:        aws.String(eventbridge.RuleStateDisabled),
@@ -145,14 +146,14 @@ func (s Service) createRule() error {
 }
 
 func (s Service) deleteRules() error {
-	_, err := s.EventBridgeClient.RemoveTargets(&eventbridge.RemoveTargetsInput{
+	_, err := s.EventBridgeClient.RemoveTargets(context.TODO(), &eventbridge.RemoveTargetsInput{
 		Rule: aws.String(s.getEC2RuleName()),
 		Ids:  aws.StringSlice([]string{GenerateQueueName(s.scope.Name())}),
 	})
 	if err != nil && !resourceNotFoundError(err) {
 		return errors.Wrapf(err, "unable to remove target %s for rule %s", GenerateQueueName(s.scope.Name()), s.getEC2RuleName())
 	}
-	_, err = s.EventBridgeClient.DeleteRule(&eventbridge.DeleteRuleInput{
+	_, err = s.EventBridgeClient.DeleteRule(context.TODO(), &eventbridge.DeleteRuleInput{
 		Name: aws.String(s.getEC2RuleName()),
 	})
 
@@ -165,7 +166,7 @@ func (s Service) deleteRules() error {
 
 // AddInstanceToEventPattern will add an instance to an event pattern.
 func (s Service) AddInstanceToEventPattern(instanceID string) error {
-	ruleResp, err := s.EventBridgeClient.DescribeRule(&eventbridge.DescribeRuleInput{
+	ruleResp, err := s.EventBridgeClient.DescribeRule(context.TODO(), &eventbridge.DescribeRuleInput{
 		Name: aws.String(s.getEC2RuleName()),
 	})
 	if err != nil {
@@ -190,7 +191,7 @@ func (s Service) AddInstanceToEventPattern(instanceID string) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.EventBridgeClient.PutRule(&eventbridge.PutRuleInput{
+	_, err = s.EventBridgeClient.PutRule(context.TODO(), &eventbridge.PutRuleInput{
 		Name:         aws.String(s.getEC2RuleName()),
 		EventPattern: aws.String(string(eventData)),
 		State:        aws.String(eventbridge.RuleStateEnabled),
@@ -201,7 +202,7 @@ func (s Service) AddInstanceToEventPattern(instanceID string) error {
 // RemoveInstanceFromEventPattern attempts a best effort update to the event rule to remove the instance.
 // Any errors encountered won't be blocking.
 func (s Service) RemoveInstanceFromEventPattern(instanceID string) {
-	ruleResp, err := s.EventBridgeClient.DescribeRule(&eventbridge.DescribeRuleInput{
+	ruleResp, err := s.EventBridgeClient.DescribeRule(context.TODO(), &eventbridge.DescribeRuleInput{
 		Name: aws.String(s.getEC2RuleName()),
 	})
 	if err != nil {
@@ -237,7 +238,7 @@ func (s Service) RemoveInstanceFromEventPattern(instanceID string) {
 		if len(e.EventDetail.InstanceIDs) == 0 {
 			input.State = aws.String(eventbridge.RuleStateDisabled)
 		}
-		_, _ = s.EventBridgeClient.PutRule(input)
+		_, _ = s.EventBridgeClient.PutRule(context.TODO(), input)
 	}
 }
 
@@ -246,10 +247,8 @@ func (s Service) getEC2RuleName() string {
 }
 
 func resourceNotFoundError(err error) bool {
-	if aerr, ok := err.(awserr.Error); ok && aerr.Code() == eventbridge.ErrCodeResourceNotFoundException {
-		return true
-	}
-	return false
+	smithyErr := awserrors.ParseSmithyError(err)
+	return smithyErr != nil && smithyErr.ErrorCode() == eventbridge.ErrCodeResourceNotFoundException
 }
 
 type eventPattern struct {

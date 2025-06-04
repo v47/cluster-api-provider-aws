@@ -24,13 +24,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/awserr"
-	"github.com/aws/aws-sdk-go/service/sqs"
-	"github.com/aws/aws-sdk-go/service/sqs/sqsiface"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/klog/v2"
+	awserrors "sigs.k8s.io/cluster-api-provider-aws/v2/pkg/cloud/awserrors"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -52,7 +51,7 @@ const Ec2InstanceStateLabelKey = "ec2-instance-state"
 type AwsInstanceStateReconciler struct {
 	client.Client
 	Log               logr.Logger
-	sqsServiceFactory func() sqsiface.SQSAPI
+	sqsServiceFactory func() instancestate.SQSAPI
 	queueURLs         sync.Map
 	Endpoints         []scope.ServiceEndpoint
 	WatchFilterValue  string
@@ -61,7 +60,7 @@ type AwsInstanceStateReconciler struct {
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=awsclusters,verbs=get;list;watch
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=awsmachines,verbs=get;list;watch
 
-func (r *AwsInstanceStateReconciler) getSQSService(region string) (sqsiface.SQSAPI, error) {
+func (r *AwsInstanceStateReconciler) getSQSService(region string) (instancestate.SQSAPI, error) {
 	if r.sqsServiceFactory != nil {
 		return r.sqsServiceFactory(), nil
 	}
@@ -144,7 +143,7 @@ func (r *AwsInstanceStateReconciler) watchQueuesForInstanceEvents() {
 					r.Log.Error(err, "unable to create SQS client")
 					return
 				}
-				resp, err := sqsSvs.ReceiveMessage(&sqs.ReceiveMessageInput{QueueUrl: aws.String(qp.URL)})
+				resp, err := sqsSvs.ReceiveMessage(context.TODO(), &sqs.ReceiveMessageInput{QueueUrl: aws.String(qp.URL)})
 				if err != nil {
 					r.Log.Error(err, "failed to receive messages")
 					return
@@ -160,7 +159,7 @@ func (r *AwsInstanceStateReconciler) watchQueuesForInstanceEvents() {
 					// TODO: handle errors during process message. We currently deletes the message regardless.
 					r.processMessage(ctx, m)
 
-					_, err = sqsSvs.DeleteMessage(&sqs.DeleteMessageInput{
+					_, err = sqsSvs.DeleteMessage(context.TODO(), &sqs.DeleteMessageInput{
 						QueueUrl:      aws.String(qp.URL),
 						ReceiptHandle: msg.ReceiptHandle,
 					})
@@ -222,7 +221,7 @@ func (r *AwsInstanceStateReconciler) getQueueURL(cluster *infrav1.AWSCluster) (s
 		return "", err
 	}
 	queueName := instancestate.GenerateQueueName(cluster.Name)
-	resp, err := sqsSvs.GetQueueUrl(&sqs.GetQueueUrlInput{QueueName: aws.String(queueName)})
+	resp, err := sqsSvs.GetQueueUrl(context.TODO(), &sqs.GetQueueUrlInput{QueueName: aws.String(queueName)})
 
 	if err != nil {
 		return "", err
@@ -232,12 +231,8 @@ func (r *AwsInstanceStateReconciler) getQueueURL(cluster *infrav1.AWSCluster) (s
 }
 
 func queueNotFoundError(err error) bool {
-	if aerr, ok := err.(awserr.Error); ok {
-		if aerr.Code() == sqs.ErrCodeQueueDoesNotExist {
-			return true
-		}
-	}
-	return false
+	smithyErr := awserrors.ParseSmithyError(err)
+	return smithyErr != nil && smithyErr.ErrorCode() == "AWS.SimpleQueueService.NonExistentQueue"
 }
 
 type queueParams struct {
