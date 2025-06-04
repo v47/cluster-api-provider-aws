@@ -17,8 +17,10 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/autoscaling v1.52.4
 	github.com/aws/aws-sdk-go-v2/service/eks v1.64.0
 	github.com/aws/aws-sdk-go-v2/service/iam v1.32.0
-	github.com/aws/aws-sdk-go-v2/service/s3 v1.53.1
-	github.com/aws/aws-sdk-go-v2/service/sts v1.28.6
+github.com/aws/aws-sdk-go-v2/service/s3 v1.53.1
+github.com/aws/aws-sdk-go-v2/service/eventbridge v1.29.0
+github.com/aws/aws-sdk-go-v2/service/sqs v1.31.0
+github.com/aws/aws-sdk-go-v2/service/sts v1.28.6
 	github.com/aws/smithy-go v1.22.2
 	github.com/awslabs/goformation/v4 v4.19.5
 	github.com/blang/semver v3.5.1+incompatible

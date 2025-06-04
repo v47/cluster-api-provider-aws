@@ -19,7 +19,9 @@ package scope
 import (
 	"github.com/aws/aws-sdk-go-v2/service/autoscaling"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
+	"github.com/aws/aws-sdk-go-v2/service/eventbridge"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/request"
@@ -29,16 +31,12 @@ import (
 	"github.com/aws/aws-sdk-go/service/elb/elbiface"
 	"github.com/aws/aws-sdk-go/service/elbv2"
 	"github.com/aws/aws-sdk-go/service/elbv2/elbv2iface"
-	"github.com/aws/aws-sdk-go/service/eventbridge"
-	"github.com/aws/aws-sdk-go/service/eventbridge/eventbridgeiface"
 	"github.com/aws/aws-sdk-go/service/iam"
 	"github.com/aws/aws-sdk-go/service/iam/iamiface"
 	"github.com/aws/aws-sdk-go/service/resourcegroupstaggingapi"
 	"github.com/aws/aws-sdk-go/service/resourcegroupstaggingapi/resourcegroupstaggingapiiface"
 	"github.com/aws/aws-sdk-go/service/secretsmanager"
 	"github.com/aws/aws-sdk-go/service/secretsmanager/secretsmanageriface"
-	"github.com/aws/aws-sdk-go/service/sqs"
-	"github.com/aws/aws-sdk-go/service/sqs/sqsiface"
 	"github.com/aws/aws-sdk-go/service/ssm"
 	"github.com/aws/aws-sdk-go/service/ssm/ssmiface"
 	"github.com/aws/aws-sdk-go/service/sts"
@@ -114,32 +112,51 @@ func NewELBv2Client(scopeUser cloud.ScopeUsage, session cloud.Session, logger lo
 }
 
 // NewEventBridgeClient creates a new EventBridge API client for a given session.
-func NewEventBridgeClient(scopeUser cloud.ScopeUsage, session cloud.Session, target runtime.Object) eventbridgeiface.EventBridgeAPI {
-	eventBridgeClient := eventbridge.New(session.Session())
-	eventBridgeClient.Handlers.Build.PushFrontNamed(getUserAgentHandler())
-	eventBridgeClient.Handlers.CompleteAttempt.PushFront(awsmetrics.CaptureRequestMetrics(scopeUser.ControllerName()))
-	eventBridgeClient.Handlers.Complete.PushBack(recordAWSPermissionsIssue(target))
-
-	return eventBridgeClient
+func NewEventBridgeClient(scopeUser cloud.ScopeUsage, session cloud.Session, target runtime.Object) *eventbridge.Client {
+	cfg := session.SessionV2()
+	eventBridgeOpts := []func(*eventbridge.Options){
+		func(o *eventbridge.Options) {
+			o.Logger = logger.GetAWSLogger()
+			o.ClientLogMode = awslogs.GetAWSLogLevelV2(logger.GetLogger())
+		},
+		eventbridge.WithAPIOptions(
+			awsmetricsv2.WithMiddlewares(scopeUser.ControllerName(), target),
+			awsmetricsv2.WithCAPAUserAgentMiddleware(),
+		),
+	}
+	return eventbridge.NewFromConfig(cfg, eventBridgeOpts...)
 }
 
 // NewSQSClient creates a new SQS API client for a given session.
-func NewSQSClient(scopeUser cloud.ScopeUsage, session cloud.Session, target runtime.Object) sqsiface.SQSAPI {
-	SQSClient := sqs.New(session.Session())
-	SQSClient.Handlers.Build.PushFrontNamed(getUserAgentHandler())
-	SQSClient.Handlers.CompleteAttempt.PushFront(awsmetrics.CaptureRequestMetrics(scopeUser.ControllerName()))
-	SQSClient.Handlers.Complete.PushBack(recordAWSPermissionsIssue(target))
-
-	return SQSClient
+func NewSQSClient(scopeUser cloud.ScopeUsage, session cloud.Session, target runtime.Object) *sqs.Client {
+	cfg := session.SessionV2()
+	sqsOpts := []func(*sqs.Options){
+		func(o *sqs.Options) {
+			o.Logger = logger.GetAWSLogger()
+			o.ClientLogMode = awslogs.GetAWSLogLevelV2(logger.GetLogger())
+		},
+		sqs.WithAPIOptions(
+			awsmetricsv2.WithMiddlewares(scopeUser.ControllerName(), target),
+			awsmetricsv2.WithCAPAUserAgentMiddleware(),
+		),
+	}
+	return sqs.NewFromConfig(cfg, sqsOpts...)
 }
 
 // NewGlobalSQSClient for creating a new SQS API client that isn't tied to a cluster.
-func NewGlobalSQSClient(scopeUser cloud.ScopeUsage, session cloud.Session) sqsiface.SQSAPI {
-	SQSClient := sqs.New(session.Session())
-	SQSClient.Handlers.Build.PushFrontNamed(getUserAgentHandler())
-	SQSClient.Handlers.CompleteAttempt.PushFront(awsmetrics.CaptureRequestMetrics(scopeUser.ControllerName()))
-
-	return SQSClient
+func NewGlobalSQSClient(scopeUser cloud.ScopeUsage, session cloud.Session) *sqs.Client {
+	cfg := session.SessionV2()
+	sqsOpts := []func(*sqs.Options){
+		func(o *sqs.Options) {
+			o.Logger = logger.GetAWSLogger()
+			o.ClientLogMode = awslogs.GetAWSLogLevelV2(logger.GetLogger())
+		},
+		sqs.WithAPIOptions(
+			awsmetricsv2.WithMiddlewares(scopeUser.ControllerName(), nil),
+			awsmetricsv2.WithCAPAUserAgentMiddleware(),
+		),
+	}
+	return sqs.NewFromConfig(cfg, sqsOpts...)
 }
 
 // NewResourgeTaggingClient creates a new Resource Tagging API client for a given session.

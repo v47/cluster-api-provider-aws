@@ -17,46 +17,46 @@ limitations under the License.
 package instancestate
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/awserr"
-	"github.com/aws/aws-sdk-go/service/sqs"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/pkg/errors"
 
 	iamv1 "sigs.k8s.io/cluster-api-provider-aws/v2/iam/api/v1beta1"
+	awserrors "sigs.k8s.io/cluster-api-provider-aws/v2/pkg/cloud/awserrors"
 )
 
 func (s *Service) reconcileSQSQueue() error {
 	attrs := make(map[string]string)
 	attrs[sqs.QueueAttributeNameReceiveMessageWaitTimeSeconds] = "20"
 
-	_, err := s.SQSClient.CreateQueue(&sqs.CreateQueueInput{
+	_, err := s.SQSClient.CreateQueue(context.TODO(), &sqs.CreateQueueInput{
 		QueueName:  aws.String(GenerateQueueName(s.scope.Name())),
 		Attributes: aws.StringMap(attrs),
 	})
 
 	if err != nil {
-		if aerr, ok := err.(awserr.Error); ok {
-			if aerr.Code() == sqs.ErrCodeQueueNameExists {
-				return nil
-			}
+		smithyErr := awserrors.ParseSmithyError(err)
+		if smithyErr.ErrorCode() == "QueueAlreadyExists" {
+			return nil
 		}
 	}
 	return errors.Wrap(err, "unable to create new queue")
 }
 
 func (s *Service) deleteSQSQueue() error {
-	resp, err := s.SQSClient.GetQueueUrl(&sqs.GetQueueUrlInput{QueueName: aws.String(GenerateQueueName(s.scope.Name()))})
+	resp, err := s.SQSClient.GetQueueUrl(context.TODO(), &sqs.GetQueueUrlInput{QueueName: aws.String(GenerateQueueName(s.scope.Name()))})
 	if err != nil {
 		if queueNotFoundError(err) {
 			return nil
 		}
 		return errors.Wrap(err, "unable to get queue URL")
 	}
-	_, err = s.SQSClient.DeleteQueue(&sqs.DeleteQueueInput{QueueUrl: resp.QueueUrl})
+	_, err = s.SQSClient.DeleteQueue(context.TODO(), &sqs.DeleteQueueInput{QueueUrl: resp.QueueUrl})
 	if err != nil && queueNotFoundError(err) {
 		return nil
 	}
@@ -88,7 +88,7 @@ func (s *Service) createPolicyForRule(input *createPolicyForRuleInput) error {
 	}
 	attrs[sqs.QueueAttributeNamePolicy] = string(policyData)
 
-	_, err = s.SQSClient.SetQueueAttributes(&sqs.SetQueueAttributesInput{
+	_, err = s.SQSClient.SetQueueAttributes(context.TODO(), &sqs.SetQueueAttributesInput{
 		QueueUrl:   aws.String(input.QueueURL),
 		Attributes: aws.StringMap(attrs),
 	})
@@ -103,12 +103,8 @@ func GenerateQueueName(clusterName string) string {
 }
 
 func queueNotFoundError(err error) bool {
-	if aerr, ok := err.(awserr.Error); ok {
-		if aerr.Code() == sqs.ErrCodeQueueDoesNotExist {
-			return true
-		}
-	}
-	return false
+	smithyErr := awserrors.ParseSmithyError(err)
+	return smithyErr != nil && smithyErr.ErrorCode() == "AWS.SimpleQueueService.NonExistentQueue"
 }
 
 type createPolicyForRuleInput struct {
